@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://editor.caneabi.dev/spec/v1/schema.json",
+  "title": "Discord template document v1",
+  "description": "Structure of a template. The libraries additionally check emoji formats, total text length and duplicate values; the fixtures in spec/fixtures are authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["design"],
+  "properties": {
+    "version": { "const": 1 },
+    "kind": { "type": ["string", "null"], "maxLength": 80 },
+    "title": { "type": ["string", "null"], "maxLength": 80 },
+    "template": { "type": ["string", "null"], "maxLength": 80 },
+    "note": { "type": ["string", "null"], "maxLength": 300 },
+    "returnHint": { "type": ["string", "null"], "maxLength": 300 },
+    "messageType": { "enum": ["general", "member", null] },
+    "sender": {
+      "type": ["object", "null"],
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 80 },
+        "avatar": { "$ref": "#/$defs/httpsUrlOrNull" }
+      }
+    },
+    "context": { "$ref": "#/$defs/context" },
+    "design": { "$ref": "#/$defs/design" }
+  },
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "snowflake": { "type": "string", "pattern": "^[0-9]{17,20}$" },
+    "httpsUrl": { "type": "string", "maxLength": 2048, "pattern": "^https://[^/@\\s]+(/\\S*)?$" },
+    "httpsUrlOrNull": { "anyOf": [{ "$ref": "#/$defs/httpsUrl" }, { "type": "null" }] },
+    "imageSource": {
+      "anyOf": [{ "$ref": "#/$defs/httpsUrl" }, { "enum": ["{server_icon}", "{server_banner}"] }]
+    },
+    "emoji": {
+      "description": "Unicode emoji or custom emoji as <:name:id>.",
+      "anyOf": [{ "type": "null" }, { "type": "string", "maxLength": 64, "pattern": "^(<a?:\\w{1,32}:\\d{17,20}>|\\S{1,16})$" }]
+    },
+    "shortText": { "type": ["string", "null"], "maxLength": 100 },
+    "design": {
+      "type": "object",
+      "required": ["blocks"],
+      "properties": {
+        "content": { "type": ["string", "null"], "maxLength": 2000, "description": "Text above the container, e.g. for pings. Counts towards the 3500 characters." },
+        "color": { "type": ["integer", "null"], "minimum": 0, "maximum": 16777215 },
+        "keepBotImage": { "enum": ["large", "small", null] },
+        "blocks": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/block" } }
+      }
+    },
+    "block": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "text": { "type": "string" },
+        "slot": { "$ref": "#/$defs/slug" },
+        "separator": { "const": true },
+        "image": { "$ref": "#/$defs/imageSource" },
+        "gallery": { "$ref": "#/$defs/imageSource" },
+        "link": {
+          "type": "object",
+          "required": ["label", "url"],
+          "properties": {
+            "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "url": { "$ref": "#/$defs/httpsUrl" },
+            "emoji": { "$ref": "#/$defs/emoji" }
+          }
+        },
+        "button": {
+          "type": "object",
+          "required": ["id", "label"],
+          "properties": {
+            "id": { "$ref": "#/$defs/slug" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "emoji": { "$ref": "#/$defs/emoji" },
+            "style": { "enum": ["primary", "secondary", "success", "danger", null] }
+          }
+        },
+        "select": { "$ref": "#/$defs/select" }
+      },
+      "additionalProperties": false
+    },
+    "select": {
+      "type": "object",
+      "required": ["id", "purpose", "mode", "exclusive", "options"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "purpose": { "$ref": "#/$defs/slug" },
+        "mode": { "enum": ["select", "buttons"] },
+        "exclusive": { "type": "boolean" },
+        "placeholder": { "type": ["string", "null"], "maxLength": 150 },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 25,
+          "items": {
+            "type": "object",
+            "required": ["value", "label"],
+            "properties": {
+              "value": { "$ref": "#/$defs/slug" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+              "emoji": { "$ref": "#/$defs/emoji" },
+              "description": { "$ref": "#/$defs/shortText" },
+              "roles": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/snowflake" } }
+            }
+          }
+        }
+      }
+    },
+    "context": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "channels": { "$ref": "#/$defs/namedList" },
+        "roles": { "$ref": "#/$defs/namedList" },
+        "emojis": { "$ref": "#/$defs/namedList" },
+        "buttons": {
+          "description": "icon: preview image used when the button has no emoji.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["id", "label"],
+            "properties": {
+              "id": { "$ref": "#/$defs/slug" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+              "sample": { "type": ["string", "null"], "maxLength": 1000 },
+              "icon": { "$ref": "#/$defs/httpsUrl" }
+            }
+          }
+        },
+        "accessory": { "description": "ID of a button shown next to the first text instead of in a row.", "$ref": "#/$defs/slug" },
+        "footer": {
+          "description": "Fixed controls of the bot as rows of images, preview only.",
+          "type": "object",
+          "required": ["rows"],
+          "properties": {
+            "label": { "type": "string", "maxLength": 100 },
+            "rows": { "type": "array", "maxItems": 5, "items": { "type": "array", "maxItems": 5, "items": { "$ref": "#/$defs/httpsUrl" } } }
+          }
+        },
+        "slots": { "$ref": "#/$defs/offerList" },
+        "selects": {
+          "description": "Selection types the bot offers. purpose ends up in the select block; roles controls roles per option.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["purpose", "label"],
+            "properties": {
+              "purpose": { "$ref": "#/$defs/slug" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+              "roles": { "enum": ["none", "optional", "single"] },
+              "modes": { "type": "array", "minItems": 1, "items": { "enum": ["select", "buttons"] } },
+              "exclusive": { "type": "boolean", "description": "Fixed value; the editor then hides the setting." },
+              "hint": { "type": "string", "maxLength": 300 }
+            }
+          }
+        }
+      }
+    },
+    "namedList": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": { "id": { "$ref": "#/$defs/snowflake" }, "name": { "type": "string", "minLength": 1, "maxLength": 100 } }
+      }
+    },
+    "offerList": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id": { "$ref": "#/$defs/slug" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "sample": { "type": ["string", "null"], "maxLength": 1000 }
+        }
+      }
+    }
+  }
+}

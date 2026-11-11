@@ -1,0 +1,88 @@
+[
+  { "name": "minimal", "doc": { "design": { "blocks": [] } } },
+  {
+    "name": "all simple blocks",
+    "doc": {
+      "version": 1,
+      "title": "Welcome",
+      "messageType": "member",
+      "sender": { "name": "Bot", "avatar": "https://cdn.example.com/a.png" },
+      "design": {
+        "content": "<@&123456789012345678> News for {server}",
+        "color": 5793266,
+        "keepBotImage": "small",
+        "blocks": [
+          { "text": "## Hello {user}\nGreat to have you here." },
+          { "separator": true },
+          { "image": "{server_icon}" },
+          { "gallery": "https://cdn.example.com/banner.png" },
+          { "link": { "label": "Rules", "url": "https://example.com/rules", "emoji": "📜" } },
+          { "button": { "id": "verify", "label": "Verify", "style": "success", "emoji": "<:ok:123456789012345678>" } },
+          { "slot": "online" }
+        ]
+      }
+    }
+  },
+  {
+    "name": "role picker",
+    "doc": {
+      "design": {
+        "blocks": [
+          {
+            "select": {
+              "id": "colors",
+              "purpose": "role_picker",
+              "mode": "buttons",
+              "exclusive": true,
+              "options": [
+                { "value": "red", "label": "Red", "emoji": "🔴", "roles": ["111111111111111111"] },
+                { "value": "blue", "label": "Blue", "roles": ["222222222222222222"] }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "ticket categories",
+    "doc": {
+      "context": {
+        "selects": [{ "purpose": "ticket_categories", "label": "Ticket categories", "roles": "optional", "modes": ["select"], "exclusive": true, "hint": "Without roles the support team sees the tickets." }],
+        "roles": [{ "id": "333333333333333333", "name": "Support" }]
+      },
+      "design": {
+        "blocks": [
+          { "text": "Pick a category." },
+          {
+            "select": {
+              "id": "tickets",
+              "purpose": "ticket_categories",
+              "mode": "select",
+              "exclusive": true,
+              "placeholder": "What is it about?",
+              "options": [
+                { "value": "support", "label": "Support", "description": "Questions and problems", "roles": ["333333333333333333"] },
+                { "value": "apply", "label": "Application", "emoji": "📝", "roles": [] }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "context offers",
+    "doc": {
+      "context": {
+        "buttons": [{ "id": "ticket", "label": "Open ticket", "icon": "https://cdn.example.com/open.png" }],
+        "accessory": "ticket",
+        "footer": { "label": "Controls", "rows": [["https://cdn.example.com/rename.png", "https://cdn.example.com/limit.png"]] },
+        "slots": [{ "id": "online", "label": "Online members", "sample": "12 members online" }],
+        "channels": [{ "id": "444444444444444444", "name": "general" }],
+        "emojis": [{ "id": "555555555555555555", "name": "wave" }]
+      },
+      "design": { "blocks": [{ "button": { "id": "ticket", "label": "Ticket" } }, { "slot": "online" }] }
+    }
+  }
+]

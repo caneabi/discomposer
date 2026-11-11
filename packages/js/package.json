@@ -1,0 +1,60 @@
+{
+  "name": "discomposer",
+  "version": "0.1.0",
+  "description": "Validate, fetch and send Discord message templates as Components V2 with discord.js.",
+  "keywords": [
+    "discord",
+    "discord.js",
+    "components-v2",
+    "embeds",
+    "templates",
+    "message-builder",
+    "tickets"
+  ],
+  "author": "Cane",
+  "license": "MIT",
+  "homepage": "https://github.com/caneabi/discomposer/tree/main/packages/js#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caneabi/discomposer.git",
+    "directory": "packages/js"
+  },
+  "bugs": {
+    "url": "https://github.com/caneabi/discomposer/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test test/*.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "peerDependencies": {
+    "discord.js": "^14.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "discord.js": "^14.28.1",
+    "typescript": "^5.9.3"
+  }
+}

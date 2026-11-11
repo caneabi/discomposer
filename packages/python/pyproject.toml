@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "discomposer"
+version = "0.1.0"
+description = "Validate, fetch and send Discord message templates as Components V2 with discord.py."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["discord.py>=2.6,<3", "aiohttp>=3.9,<4"]
+authors = [{ name = "Cane" }]
+keywords = ["discord", "discord.py", "components-v2", "embeds", "templates", "message-builder", "tickets"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: Chat",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/caneabi/discomposer"
+Editor = "https://editor.caneabi.dev"
+Documentation = "https://github.com/caneabi/discomposer/tree/main/packages/python#readme"
+Format = "https://github.com/caneabi/discomposer/blob/main/spec/FORMAT.md"
+Issues = "https://github.com/caneabi/discomposer/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/discomposer"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
