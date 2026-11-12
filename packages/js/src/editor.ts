@@ -1,11 +1,11 @@
 import { ChannelType, PermissionFlagsBits, type Guild } from "discord.js";
-import { validate, validateDesign, type Context, type Design, type TemplateDocument } from "./format.js";
+import { CODE_PATTERN, validate, validateDesign, type Context, type Design, type TemplateDocument } from "./format.js";
 import { MAX_IMAGE, MediaError, type MediaStore } from "./media.js";
+import { readBody } from "./transport.js";
 
-export const DEFAULT_URL = "https://editor.caneabi.dev";
+export const DEFAULT_URL = "https://editor.discomposer.dev";
 // Only the editor and Discord's CDN are fetched, so templates can't reach internal URLs.
 const DISCORD_MEDIA = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
-const CODE = /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/;
 const MAX_RESPONSE = 70 * 1024;
 const OFFLINE = "The editor is unavailable right now. Please try again later.";
 
@@ -16,29 +16,24 @@ export class EditorError extends Error {
 
 /** Reads the whole body, failing above `limit` bytes. */
 export async function readAll(response: Response, limit: number): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  if (response.body) {
-    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-      size += chunk.length;
-      if (size > limit) throw new EditorError("The response is too large.");
-      chunks.push(chunk);
-    }
+  try {
+    return await readBody(response, limit);
+  } catch (error) {
+    if (error instanceof RangeError) throw new EditorError(error.message);
+    throw error;
   }
-  const data = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    data.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return data;
 }
 
 /** Returns the code from a code or an editor link. */
 export function parseCode(value: string): string {
-  const code = String(value).trim().replace(/\/+$/, "").split("/").pop()!.toUpperCase();
-  if (!CODE.test(code)) throw new EditorError("That is not a valid code. It looks like this: K7F3M-9QX2A");
-  return code;
+  try {
+    const path = new URL(String(value).trim(), DEFAULT_URL).pathname;
+    const code = path.replace(/\/+$/, "").split("/").pop()!.toUpperCase();
+    if (CODE_PATTERN.test(code)) return code;
+  } catch {
+    // Native URL parsing failed; use the same message as for malformed codes.
+  }
+  throw new EditorError("That is not a valid code. It looks like this: K7F3M-9QX2A");
 }
 
 /** Channels, roles and emojis for the editor. Codes aren't secret, so only public ones. */
@@ -71,10 +66,18 @@ export class EditorClient {
   private readonly imageUrl: RegExp;
 
   constructor(options: EditorClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? DEFAULT_URL).replace(/\/+$/, "");
+    try {
+      const url = new URL(options.baseUrl ?? DEFAULT_URL);
+      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+        throw new Error("Invalid editor URL");
+      }
+      this.baseUrl = url.href.replace(/\/+$/, "");
+    } catch {
+      throw new EditorError("The editor URL must be an HTTP(S) URL without credentials, query or fragment.");
+    }
     this.media = options.media;
     this.timeoutMs = options.timeoutMs ?? 30_000;
-    this.imageUrl = new RegExp(`^${this.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/images/[0-9a-f]{64}$`);
+    this.imageUrl = new RegExp(`^${this.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/images/[0-9a-f]{64}(?![\\s\\S])`);
   }
 
   private async request(url: string, init: RequestInit = {}, limit = MAX_RESPONSE): Promise<{ status: number; body: Uint8Array }> {
@@ -90,7 +93,7 @@ export class EditorClient {
   private async json(path: string, init: RequestInit = {}): Promise<{ status: number; body: Record<string, unknown> | null }> {
     const { status, body } = await this.request(this.baseUrl + path, init);
     try {
-      const parsed = JSON.parse(new TextDecoder().decode(body));
+      const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
       return { status, body: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null };
     } catch {
       throw new EditorError(OFFLINE);
@@ -104,7 +107,7 @@ export class EditorClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(validate(document)),
     });
-    if (status !== 201 || typeof body?.code !== "string") throw new EditorError(typeof body?.error === "string" ? body.error : OFFLINE);
+    if (status !== 201 || typeof body?.code !== "string" || !CODE_PATTERN.test(body.code)) throw new EditorError(typeof body?.error === "string" ? body.error : OFFLINE);
     return `${this.baseUrl}/e/${body.code}`;
   }
 
@@ -115,7 +118,7 @@ export class EditorClient {
       headers: { "content-type": "application/octet-stream" },
       body: raw as BodyInit,
     });
-    if (status !== 201 || typeof body?.path !== "string") throw new EditorError(typeof body?.error === "string" ? body.error : OFFLINE);
+    if (status !== 201 || typeof body?.path !== "string" || !/^\/api\/images\/[0-9a-f]{64}(?![\s\S])/.test(body.path)) throw new EditorError(typeof body?.error === "string" ? body.error : OFFLINE);
     return this.baseUrl + body.path;
   }
 
@@ -139,17 +142,22 @@ export class EditorClient {
     if (!media) throw new EditorError("The client needs a MediaStore to adopt images.");
     const copy: Design = structuredClone(design);
     const attachments: Record<string, string> = { ...copy.attachments };
+    const adopted = new Map<string, string>();
     for (const block of copy.blocks as Record<string, unknown>[]) {
       for (const key of ["image", "gallery"]) {
         const value = block[key];
         if (typeof value !== "string") continue;
+        const previous = adopted.get(value);
+        if (previous) { block[key] = previous; continue; }
+        let source: URL;
+        try { source = new URL(value); } catch { continue; }
         let raw: Uint8Array;
-        if (this.imageUrl.test(value)) {
-          const { status, body } = await this.request(value, {}, MAX_IMAGE);
+        if (this.imageUrl.test(source.href)) {
+          const { status, body } = await this.request(source.href, {}, MAX_IMAGE);
           if (status !== 200) throw new EditorError("An uploaded image has expired. Please upload it again.");
           raw = body;
-        } else if (value.startsWith("https://") && DISCORD_MEDIA.has(new URL(value).hostname)) {
-          const { status, body } = await this.request(value, {}, MAX_IMAGE).catch(() => {
+        } else if (source.protocol === "https:" && DISCORD_MEDIA.has(source.hostname)) {
+          const { status, body } = await this.request(source.href, {}, MAX_IMAGE).catch(() => {
             throw new EditorError("An image could not be loaded. Please upload it in the editor.");
           });
           if (status !== 200) throw new EditorError("A Discord image has expired. Please upload it again in the editor.");
@@ -164,6 +172,7 @@ export class EditorClient {
         const name = media.attachmentName(stored, raw);
         attachments[name] = stored;
         block[key] = `attachment://${name}`;
+        adopted.set(value, block[key] as string);
       }
     }
     if (Object.keys(attachments).length) copy.attachments = attachments;
@@ -173,13 +182,19 @@ export class EditorClient {
   /** Reverse of adoptImages: uploads stored attachments so the editor can show them. */
   async exposeAttachments(design: Design): Promise<Design> {
     const { attachments = {}, ...rest } = structuredClone(design);
+    const uploaded = new Map<string, string>();
     for (const block of rest.blocks as Record<string, unknown>[]) {
       for (const key of ["image", "gallery"]) {
         const value = block[key];
         if (typeof value === "string" && value.startsWith("attachment://")) {
           const stored = attachments[value.slice("attachment://".length)];
           if (!stored || !this.media) throw new EditorError("An image of this template is missing.");
-          block[key] = await this.upload(await this.media.read(stored));
+          let url = uploaded.get(stored);
+          if (!url) {
+            url = await this.upload(await this.media.read(stored));
+            uploaded.set(stored, url);
+          }
+          block[key] = url;
         }
       }
     }

@@ -2,8 +2,8 @@ import re
 
 import discord
 
-from discomposer.format import IMAGE_VARIABLES
-from discomposer.variables import fill_variables
+from discomposer.format import IMAGE_VARIABLES, TemplateError
+from discomposer.variables import fill_variables, variable_values
 
 BUTTON_STYLES = {
     "primary": discord.ButtonStyle.primary,
@@ -83,11 +83,17 @@ def render(
     selects: callable(select, guild) -> items; select blocks are skipped without it.
     variables: extra variables, e.g. {"{level}": "3"}.
     """
+    if "color" in design:
+        container.accent_colour = (
+            discord.Colour(design["color"]) if design["color"] is not None else None
+        )
     for item in header:
         container.add_item(item)
 
+    values = {**variable_values(member, guild), **(variables or {})}
+
     def fill(text):
-        return fill_variables(text, member, guild, variables)
+        return fill_variables(text, extra=values)
 
     def resolved(url):
         return fill(url) if url in IMAGE_VARIABLES else url
@@ -108,8 +114,11 @@ def render(
         nonlocal image, accessory
         if not texts:
             return
-        display = discord.ui.TextDisplay("\n".join(texts))
+        content = "\n".join(texts)
         texts.clear()
+        if not content.strip():
+            return
+        display = discord.ui.TextDisplay(content)
         if image:
             container.add_item(discord.ui.Section(display, accessory=discord.ui.Thumbnail(image)))
             image = None
@@ -120,11 +129,13 @@ def render(
             container.add_item(display)
 
     def flush_gallery():
-        if galleries:
+        for start in range(0, len(galleries), 10):
             container.add_item(
-                discord.ui.MediaGallery(*(discord.MediaGalleryItem(url) for url in galleries[:10]))
+                discord.ui.MediaGallery(
+                    *(discord.MediaGalleryItem(url) for url in galleries[start : start + 10])
+                )
             )
-            galleries.clear()
+        galleries.clear()
 
     for block in blocks:
         if "link" in block:
@@ -192,7 +203,8 @@ def outside_text(design, *, member=None, guild=None, variables=None):
     content = design.get("content")
     if not content:
         return None
-    return discord.ui.TextDisplay(fill_variables(content, member, guild, variables))
+    content = fill_variables(content, member, guild, variables)
+    return discord.ui.TextDisplay(content) if content.strip() else None
 
 
 def render_message(design, **options):
@@ -200,11 +212,16 @@ def render_message(design, **options):
 
     Takes the same options as render.
     """
-    container = render(discord.ui.Container(accent_colour=design.get("color")), design, **options)
+    container = render(discord.ui.Container(), design, **options)
     text = outside_text(
         design,
         member=options.get("member"),
         guild=options.get("guild"),
         variables=options.get("variables"),
     )
-    return [text, container] if text else [container]
+    items = [text] if text else []
+    if container.children:
+        items.append(container)
+    if not items:
+        raise TemplateError("The template has no visible content.")
+    return items

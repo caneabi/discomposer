@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://editor.caneabi.dev/spec/v1/schema.json",
+  "$id": "https://docs.discomposer.dev/spec/v1/schema.json",
   "title": "Discord template document v1",
   "description": "Structure of a template. The libraries additionally check emoji formats, total text length and duplicate values; the fixtures in spec/fixtures are authoritative.",
   "type": "object",

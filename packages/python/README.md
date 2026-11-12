@@ -2,8 +2,10 @@
 
 <p align="center">
   Validate, fetch and send Discord message templates as Components V2.<br>
-  Design the message in the <a href="https://editor.caneabi.dev">visual editor</a>, send it from your bot with a code.
+  Design the message in the <a href="https://editor.discomposer.dev">visual editor</a>, send it from your bot with a code.
 </p>
+
+[Website](https://discomposer.dev) · [Editor](https://editor.discomposer.dev) · [Documentation](https://docs.discomposer.dev)
 
 <p align="center">
   <a href="https://pypi.org/project/discomposer/"><img src="https://img.shields.io/pypi/v/discomposer?color=7b61ff" alt="PyPI"></a>
@@ -30,7 +32,7 @@ from discomposer import EditorClient, MediaStore, render_message, select_rows
 editor = EditorClient(media=MediaStore("data/media"))
 
 async def send(channel, code):
-    design = await editor.fetch(code)  # validates and keeps a copy of every image
+    design = await editor.fetch(code)  # validates and copies editor/Discord CDN images
     view = discord.ui.LayoutView(timeout=None)
     for item in render_message(
         design,
@@ -79,6 +81,21 @@ if option:
     )
 ```
 
+## Use your own editor
+
+```python
+editor = EditorClient(
+    base_url="https://your-editor.example",
+    media=MediaStore("data/media"),
+)
+```
+
+Shared links supply a code; they never change the configured host. Your editor
+implements the same open [HTTP protocol](https://github.com/caneabi/discomposer/blob/main/spec/API.md).
+The template format and bot library are independent of the closed-source hosted
+frontend. A reusable backend is available through the JS package's
+`discomposer/server` entry point; it serves both bot libraries.
+
 ## API overview
 
 | Area | Functions |
@@ -94,3 +111,13 @@ Errors: `TemplateError` (format), `EditorError` (editor, network), `MediaError` 
 The template format is specified in [spec/FORMAT.md](https://github.com/caneabi/discomposer/blob/main/spec/FORMAT.md). A JavaScript version for discord.js is available as [`discomposer` on npm](https://www.npmjs.com/package/discomposer).
 
 discomposer is not affiliated with or endorsed by Discord Inc.
+
+
+
+Use one MediaStore instance per directory. Saves through that instance serialize
+quota checks and publish complete files through an atomic rename. Separate processes
+sharing a directory need coordination supplied by the application.
+
+
+Image adoption copies editor uploads and Discord CDN images. Other HTTPS image URLs
+remain external references and depend on their host remaining available.

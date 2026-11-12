@@ -15,22 +15,22 @@ import {
   type GuildMember,
   type MessageActionRowComponentBuilder,
 } from "discord.js";
-import { IMAGE_VARIABLES, type Button, type Design, type Select } from "./format.js";
-import { fillVariables } from "./variables.js";
+import { TemplateError, IMAGE_VARIABLES, type Button, type Design, type Select } from "./format.js";
+import { fillVariables, variableValues } from "./variables.js";
 
 export const SEPARATOR_TEXT = "────────";
-const STYLES: Record<string, ButtonStyle> = {
-  primary: ButtonStyle.Primary,
-  secondary: ButtonStyle.Secondary,
-  success: ButtonStyle.Success,
-  danger: ButtonStyle.Danger,
-};
+const STYLES = new Map<string, ButtonStyle>([
+  ["primary", ButtonStyle.Primary],
+  ["secondary", ButtonStyle.Secondary],
+  ["success", ButtonStyle.Success],
+  ["danger", ButtonStyle.Danger],
+]);
 
 export type Row = ActionRowBuilder<MessageActionRowComponentBuilder>;
 export type ContainerItem = TextDisplayBuilder | SectionBuilder | MediaGalleryBuilder | SeparatorBuilder | Row;
 
 export function buttonStyle(name?: string): ButtonStyle {
-  return STYLES[name ?? "secondary"] ?? ButtonStyle.Secondary;
+  return STYLES.get(name ?? "secondary") ?? ButtonStyle.Secondary;
 }
 
 /** Adds an item with the matching method; ContainerBuilder only has typed add methods. */
@@ -103,7 +103,8 @@ export function render(design: Design, options: RenderOptions = {}, container = 
   let accessory = options.accessory ?? null;
   if (design.color !== undefined) container.setAccentColor(design.color);
   for (const item of options.header ?? []) addItem(container, item);
-  const fill = (value: string) => fillVariables(value, member, guild, variables);
+  const values = { ...variableValues(member, guild), ...variables };
+  const fill = (value: string) => fillVariables(value, null, null, values);
   const resolved = (url: string) => ((IMAGE_VARIABLES as readonly string[]).includes(url) ? fill(url) : url);
 
   let image: string | null = options.thumbnail ?? null;
@@ -122,8 +123,10 @@ export function render(design: Design, options: RenderOptions = {}, container = 
   };
   const flushText = () => {
     if (!texts.length) return;
-    const display = new TextDisplayBuilder().setContent(texts.join("\n"));
+    const content = texts.join("\n");
     texts.length = 0;
+    if (!content.trim()) return;
+    const display = new TextDisplayBuilder().setContent(content);
     if (image) {
       addItem(container, new SectionBuilder().addTextDisplayComponents(display).setThumbnailAccessory(new ThumbnailBuilder().setURL(image)));
       image = null;
@@ -133,8 +136,11 @@ export function render(design: Design, options: RenderOptions = {}, container = 
     } else addItem(container, display);
   };
   const flushGallery = () => {
-    if (!galleries.length) return;
-    addItem(container, new MediaGalleryBuilder().addItems(galleries.slice(0, 10).map((url) => new MediaGalleryItemBuilder().setURL(url))));
+    for (let start = 0; start < galleries.length; start += 10) {
+      addItem(container, new MediaGalleryBuilder().addItems(
+        galleries.slice(start, start + 10).map((url) => new MediaGalleryItemBuilder().setURL(url)),
+      ));
+    }
     galleries.length = 0;
   };
 
@@ -146,7 +152,7 @@ export function render(design: Design, options: RenderOptions = {}, container = 
       continue;
     }
     if ("button" in block) {
-      const action = buttons[block.button.id];
+      const action = Object.hasOwn(buttons, block.button.id) ? buttons[block.button.id] : undefined;
       if (action) {
         flushText();
         flushGallery();
@@ -164,7 +170,7 @@ export function render(design: Design, options: RenderOptions = {}, container = 
     if ("slot" in block) {
       flushLinks();
       flushGallery();
-      const value = slots[block.slot];
+      const value = Object.hasOwn(slots, block.slot) ? slots[block.slot] : undefined;
       if (value) texts.push(value);
       continue;
     }
@@ -196,12 +202,16 @@ export function render(design: Design, options: RenderOptions = {}, container = 
 /** The design's content as a TextDisplayBuilder placed above the container, or null. */
 export function outsideText(design: Design, options: Pick<RenderOptions, "member" | "guild" | "variables"> = {}): TextDisplayBuilder | null {
   if (!design.content) return null;
-  return new TextDisplayBuilder().setContent(fillVariables(design.content, options.member, options.guild, options.variables));
+  const content = fillVariables(design.content, options.member, options.guild, options.variables);
+  return content.trim() ? new TextDisplayBuilder().setContent(content) : null;
 }
 
 /** Top-level components of a message: the outside text (if any) and the filled container. */
 export function renderMessage(design: Design, options: RenderOptions = {}): (TextDisplayBuilder | ContainerBuilder)[] {
   const text = outsideText(design, options);
   const container = render(design, options);
-  return text ? [text, container] : [container];
+  const items: (TextDisplayBuilder | ContainerBuilder)[] = text ? [text] : [];
+  if (container.components.length) items.push(container);
+  if (!items.length) throw new TemplateError("The template has no visible content.");
+  return items;
 }

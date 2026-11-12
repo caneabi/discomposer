@@ -10,8 +10,8 @@ BUTTON_STYLES = ("primary", "secondary", "success", "danger")
 SELECT_MODES = ("select", "buttons")
 ROLE_MODES = ("none", "optional", "single")
 SLUG = re.compile(r"[A-Za-z0-9_-]{1,64}")
-SNOWFLAKE = re.compile(r"\d{17,20}")
-CUSTOM_EMOJI = re.compile(r"<a?:\w{1,32}:\d{17,20}>")
+SNOWFLAKE = re.compile(r"\d{17,20}", re.ASCII)
+CUSTOM_EMOJI = re.compile(r"<a?:\w{1,32}:\d{17,20}>", re.ASCII)
 DOCUMENT_KEYS = {
     "version",
     "kind",
@@ -30,10 +30,17 @@ class TemplateError(ValueError):
     """The template violates the format. The message is meant for end users."""
 
 
+def _length(value):
+    """Wire limits use UTF-16 code units, matching the JavaScript library."""
+    if value.isascii():
+        return len(value)
+    return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
 def _text(value, limit, message, *, required=False):
     if value is None and not required:
         return None
-    if not isinstance(value, str) or len(value) > limit or (required and not value.strip()):
+    if not isinstance(value, str) or _length(value) > limit or (required and not value.strip()):
         raise TemplateError(message)
     return value
 
@@ -46,7 +53,7 @@ def clean_emoji(value):
         return value
     valid = (
         isinstance(value, str)
-        and 0 < len(value) <= 16
+        and 0 < _length(value) <= 16
         and not any(char.isspace() or char.isalpha() or char in "<>" for char in value)
     )
     if not valid:
@@ -55,9 +62,13 @@ def clean_emoji(value):
 
 
 def https_url(value):
-    if not isinstance(value, str) or len(value) > 2048:
+    if not isinstance(value, str) or _length(value) > 2048:
         raise TemplateError("Invalid URL.")
-    url = urlsplit(value)
+    try:
+        url = urlsplit(value)
+        _ = url.port
+    except ValueError:
+        raise TemplateError("Images and links need a public HTTPS URL.") from None
     if url.scheme != "https" or not url.hostname or url.username or url.password:
         raise TemplateError("Images and links need a public HTTPS URL.")
     return value
@@ -195,7 +206,7 @@ def validate_design(design):
             ids.add(cleaned["select"]["id"])
         blocks.append(cleaned)
     content = _text(design.get("content"), 2000, "The outside text is too long.")
-    length = sum(len(block.get("text", "")) for block in blocks) + len(content or "")
+    length = sum(_length(block.get("text", "")) for block in blocks) + _length(content or "")
     if length > MAX_TEXT:
         raise TemplateError(f"At most {MAX_TEXT} characters of text.")
     result = {"blocks": blocks}
@@ -281,7 +292,7 @@ def _clean_context(context):
                 if not isinstance(ident, str) or not SNOWFLAKE.fullmatch(ident):
                     raise TemplateError("Invalid context.")
                 _text(name, 100, "Invalid context.", required=True)
-                if key == "emojis" and not re.fullmatch(r"\w{2,32}", name):
+                if key == "emojis" and not re.fullmatch(r"\w{2,32}", name, re.ASCII):
                     raise TemplateError("Invalid context.")
                 entry = {"id": ident, "name": name}
                 if key == "emojis" and item.get("animated") is True:
@@ -295,7 +306,7 @@ def validate(document):
     """Validate a whole document and return a cleaned copy. Raises TemplateError."""
     if not isinstance(document, dict) or set(document) - DOCUMENT_KEYS:
         raise TemplateError("Invalid template.")
-    if document.get("version") not in (None, 1):
+    if isinstance(document.get("version"), bool) or document.get("version") not in (None, 1):
         raise TemplateError("Unknown format version.")
     result = {}
     for key, limit in (

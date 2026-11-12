@@ -36,7 +36,8 @@ before(async () => {
 after(() => server.close());
 
 test("parseCode accepts links and rejects garbage", () => {
-  assert.equal(parseCode(" https://editor.caneabi.dev/e/abcde-12345/ "), "ABCDE-12345");
+  assert.equal(new EditorClient().baseUrl, "https://editor.discomposer.dev");
+  assert.equal(parseCode(" https://editor.discomposer.dev/e/abcde-12345/ "), "ABCDE-12345");
   assert.throws(() => parseCode("nope"), EditorError);
 });
 
@@ -55,4 +56,44 @@ test("roundtrip and complete image adoption", async () => {
 
 test("expired code", async () => {
   await assert.rejects(new EditorClient({ baseUrl: base }).fetch("ZZZZZ-99999"), /expired/);
+});
+
+
+test("custom URLs are validated and link query strings do not become part of the code", () => {
+  assert.equal(parseCode("https://custom.example/e/abcde-12345/?from=bot#edit"), "ABCDE-12345");
+  assert.equal(new EditorClient({ baseUrl: "https://custom.example///" }).baseUrl, "https://custom.example");
+  for (const baseUrl of ["file:///tmp", "https://user:pass@example.com", "https://example.com/?x=y", "https://example.com/#x", "not a URL"]) {
+    assert.throws(() => new EditorClient({ baseUrl }), EditorError);
+  }
+});
+
+test("repeated images are downloaded only once per adoption", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "templates-dedup-"));
+  const media = new MediaStore(folder);
+  let saves = 0;
+  const original = media.save.bind(media);
+  media.save = async (bytes) => { saves++; return original(bytes); };
+  const client = new EditorClient({ baseUrl: base, media });
+  const url = base + "/api/images/" + HASH;
+  const design = await client.adoptImages({ blocks: [{ image: url }, { gallery: url }] });
+  assert.equal(saves, 1);
+  assert.equal(design.blocks[0].image, design.blocks[1].gallery);
+  let uploads = 0;
+  const publicUrl = "https://custom.example/api/images/" + HASH;
+  client.upload = async () => { uploads++; return publicUrl; };
+  const exposed = await client.exposeAttachments(design);
+  assert.equal(uploads, 1);
+  assert.deepEqual(exposed.blocks, [{ image: publicUrl }, { gallery: publicUrl }]);
+});
+
+
+test("equivalent editor URL spellings still adopt their uploaded images", async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), "templates-origin-"));
+  const { rm } = await import("node:fs/promises");
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const client = new EditorClient({ baseUrl: base, media: new MediaStore(folder) });
+  const adopted = await client.adoptImages({
+    blocks: [{ gallery: base.replace("http:", "HTTP:") + "/api/images/" + HASH }],
+  });
+  assert.equal(Object.values(adopted.attachments)[0], HASH);
 });

@@ -1,6 +1,9 @@
 // Validation and normalization of the template format (spec/FORMAT.md).
 
 export const MAX_BLOCKS = 20;
+export const MAX_BYTES = 64 * 1024;
+// Unlike $, the final assertion rejects trailing line breaks.
+export const CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}(?![\s\S])/;
 export const MAX_TEXT = 3500;
 export const IMAGE_VARIABLES = ["{server_icon}", "{server_banner}"] as const;
 export const BUTTON_STYLES = ["primary", "secondary", "success", "danger"] as const;
@@ -90,9 +93,9 @@ export class TemplateError extends Error {
   override name = "TemplateError";
 }
 
-const SLUG = /^[A-Za-z0-9_-]{1,64}$/;
-const SNOWFLAKE = /^\d{17,20}$/;
-const CUSTOM_EMOJI = /^<a?:\w{1,32}:\d{17,20}>$/;
+const SLUG = /^[A-Za-z0-9_-]{1,64}(?![\s\S])/;
+const SNOWFLAKE = /^\d{17,20}(?![\s\S])/;
+const CUSTOM_EMOJI = /^<a?:\w{1,32}:\d{17,20}>(?![\s\S])/;
 const DOCUMENT_KEYS = new Set(["version", "kind", "title", "template", "note", "returnHint", "sender", "messageType", "context", "design"]);
 
 type Json = Record<string, unknown>;
@@ -120,7 +123,7 @@ function roles(value: unknown, limit: number, message: string): string[] {
 export function cleanEmoji(value: unknown): string | undefined {
   if (missing(value)) return undefined;
   if (typeof value === "string" && CUSTOM_EMOJI.test(value)) return value;
-  const valid = typeof value === "string" && [...value].length > 0 && value.length <= 16 && !/[\s\p{L}<>]/u.test(value);
+  const valid = typeof value === "string" && value.length > 0 && value.length <= 16 && !/[\s\p{L}<>]/u.test(value);
   if (!valid) throw new TemplateError("An emoji is invalid.");
   return value as string;
 }
@@ -285,7 +288,7 @@ function cleanContext(context: unknown): Context {
       }
       if (typeof item.id !== "string" || !SNOWFLAKE.test(item.id)) throw new TemplateError(fail);
       const name = text(item.name, 100, fail, true)!;
-      if (key === "emojis" && !/^\w{2,32}$/.test(name)) throw new TemplateError(fail);
+      if (key === "emojis" && !/^\w{2,32}(?![\s\S])/.test(name)) throw new TemplateError(fail);
       const entry: Json = { id: item.id, name };
       if (key === "emojis" && item.animated === true) entry.animated = true;
       return entry;

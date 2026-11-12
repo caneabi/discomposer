@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "discomposer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Validate, fetch and send Discord message templates as Components V2 with discord.py."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["discord.py>=2.6,<3", "aiohttp>=3.9,<4"]
+dependencies = ["discord.py>=2.6,<3", "aiohttp>=3.9,<4", "yarl>=1.17,<2"]
 authors = [{ name = "Cane" }]
 keywords = ["discord", "discord.py", "components-v2", "embeds", "templates", "message-builder", "tickets"]
 classifiers = [
@@ -27,14 +27,15 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/caneabi/discomposer"
-Editor = "https://editor.caneabi.dev"
-Documentation = "https://github.com/caneabi/discomposer/tree/main/packages/python#readme"
+Homepage = "https://discomposer.dev"
+Editor = "https://editor.discomposer.dev"
+Documentation = "https://docs.discomposer.dev"
 Format = "https://github.com/caneabi/discomposer/blob/main/spec/FORMAT.md"
 Issues = "https://github.com/caneabi/discomposer/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
+lint = ["ruff==0.17.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/discomposer"]
@@ -51,3 +52,5 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["discomposer"]

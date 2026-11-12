@@ -1,6 +1,8 @@
 import hashlib
 import re
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from threading import Lock
 
 import discord
 
@@ -32,8 +34,13 @@ class MediaStore:
     def __init__(self, path, quota=128 * 1024 * 1024):
         self.path = Path(path)
         self.quota = quota
+        self._lock = Lock()
 
     def save(self, raw):
+        with self._lock:
+            return self._save(raw)
+
+    def _save(self, raw):
         if len(raw) > MAX_IMAGE or not image_extension(raw):
             raise MediaError("Please use a PNG, JPEG, GIF or WebP image up to 8 MB.")
         self.path.mkdir(parents=True, exist_ok=True)
@@ -43,7 +50,17 @@ class MediaStore:
             used = sum(p.stat().st_size for p in self.path.iterdir() if p.is_file())
             if used + len(raw) > self.quota:
                 raise MediaError("The image store is full. Please clean up old template images.")
-            target.write_bytes(raw)
+            temporary = None
+            try:
+                with NamedTemporaryFile(
+                    dir=self.path, prefix=".", suffix=".tmp", delete=False
+                ) as file:
+                    temporary = Path(file.name)
+                    file.write(raw)
+                temporary.replace(target)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
         return name
 
     def file(self, stored):

@@ -72,3 +72,52 @@ test("renderMessage puts content outside the container", async () => {
   assert.equal(items[0].content, "<@&1> Example\\_Server");
 });
 
+
+
+
+test("all gallery images survive grouping into Discord's ten-item galleries", () => {
+  const urls = Array.from({ length: 20 }, (_, n) => "https://images.example/" + n + ".png");
+  const data = render({ blocks: urls.map((gallery) => ({ gallery })) }).toJSON();
+  assert.deepEqual(data.components.map((gallery) => gallery.items.length), [10, 10]);
+  assert.deepEqual(data.components.flatMap((gallery) => gallery.items.map((item) => item.media.url)), urls);
+});
+
+test("outside-only messages omit empty containers and empty output fails clearly", async () => {
+  const { renderMessage, TemplateError } = await import("../dist/index.js");
+  assert.deepEqual(renderMessage({ content: "Only outside", blocks: [] }).map((item) => item.toJSON()), [
+    { type: 10, content: "Only outside" },
+  ]);
+  assert.throws(() => renderMessage({ blocks: [{ slot: "missing" }] }), TemplateError);
+});
+
+test("unregistered action IDs never resolve inherited object properties", () => {
+  const blocks = ["constructor", "toString", "__proto__"].flatMap((id) => [
+    { button: { id, label: "Unknown", style: "secondary" } }, { slot: id },
+  ]);
+  const data = render({ blocks: [{ text: "Known" }, ...blocks] }).toJSON();
+  assert.deepEqual(data.components, [{ type: 10, content: "Known" }]);
+});
+
+
+
+test("empty variable values do not leave empty text displays", async () => {
+  const { renderMessage, TemplateError, buttonStyle } = await import("../dist/index.js");
+  assert.throws(() => renderMessage({ content: "{mention}", blocks: [{ text: "{nickname}" }] }), TemplateError);
+  assert.equal(renderMessage({ content: " ", blocks: [{ text: "Visible" }] }).length, 1);
+  assert.equal(buttonStyle("constructor"), ButtonStyle.Secondary);
+});
+
+
+
+test("one render scans a complete member cache once for all text blocks", () => {
+  let scans = 0;
+  const completeGuild = { ...guild, memberCount: 1, members: {
+    cache: { size: 1, filter() { scans++; return { size: 0 }; } },
+  } };
+  const completeMember = { ...member, guild: completeGuild };
+  const data = render({ blocks: Array.from({ length: 20 }, () => ({ text: "{member_number}" })) }, {
+    member: completeMember,
+  }).toJSON();
+  assert.equal(data.components[0].content, Array(20).fill("1").join("\n"));
+  assert.equal(scans, 1);
+});

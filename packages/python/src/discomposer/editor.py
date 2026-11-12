@@ -5,11 +5,12 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 import aiohttp
+from yarl import URL
 
 from discomposer.format import validate, validate_design
 from discomposer.media import MAX_IMAGE, MediaError
 
-DEFAULT_URL = "https://editor.caneabi.dev"
+DEFAULT_URL = "https://editor.discomposer.dev"
 # Only the editor and Discord's CDN are fetched, so templates can't reach internal URLs.
 DISCORD_MEDIA = frozenset({"cdn.discordapp.com", "media.discordapp.net"})
 CODE = re.compile(r"[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}")
@@ -33,7 +34,10 @@ async def read_all(response, limit):
 
 def parse_code(value):
     """Return the code from a code or an editor link."""
-    code = str(value).strip().rstrip("/").rsplit("/", 1)[-1].upper()
+    try:
+        code = urlsplit(str(value).strip()).path.rstrip("/").rsplit("/", 1)[-1].upper()
+    except ValueError:
+        code = ""
     if not CODE.fullmatch(code):
         raise EditorError("That is not a valid code. It looks like this: K7F3M-9QX2A")
     return code
@@ -108,35 +112,61 @@ def guild_context(guild):
     }
 
 
+def _error(body):
+    value = body.get("error") if isinstance(body, dict) else None
+    return value if isinstance(value, str) and value else OFFLINE
+
+
 class EditorClient:
     """Client for the template editor. Pass a MediaStore to keep copies of images."""
 
     def __init__(self, base_url=DEFAULT_URL, media=None, *, timeout=30):
-        self.base_url = base_url.rstrip("/")
+        try:
+            url = URL(base_url)
+            if (
+                url.scheme not in ("https", "http") or not url.host
+                or url.user or url.password or url.query or url.fragment
+            ):
+                raise ValueError
+            # Accessing port also validates its syntax and range.
+            _ = url.port
+        except (TypeError, ValueError):
+            raise EditorError(
+                "The editor URL must be an HTTP(S) URL without credentials, query or fragment."
+            ) from None
+        self.base_url = str(url).rstrip("/")
         self.media = media
         self.timeout = timeout
         self.image_url = re.compile(re.escape(self.base_url) + r"/api/images/[0-9a-f]{64}")
 
-    async def _request(self, method, path, *, limit=MAX_RESPONSE, parse=True, **kwargs):
+    async def _request(
+        self, method, path, *, limit=MAX_RESPONSE, parse=True, offline=OFFLINE, **kwargs
+    ):
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         try:
             async with (
                 aiohttp.ClientSession(timeout=timeout) as session,
                 session.request(
-                    method, self.base_url + path, allow_redirects=False, **kwargs
+                    method,
+                    self.base_url + path if path.startswith("/") else path,
+                    allow_redirects=False,
+                    **kwargs,
                 ) as response,
             ):
                 raw = await read_all(response, limit)
                 return response.status, json.loads(raw) if parse else raw
         except (aiohttp.ClientError, TimeoutError, ValueError):
-            raise EditorError(OFFLINE) from None
+            raise EditorError(offline) from None
 
     async def open(self, document):
         """Store a document and return the link to edit it."""
         document = validate(document)
         status, body = await self._request("POST", "/api/templates", json=document)
-        if status != 201 or not isinstance(body, dict) or not isinstance(body.get("code"), str):
-            raise EditorError((body or {}).get("error") if isinstance(body, dict) else OFFLINE)
+        if (
+            status != 201 or not isinstance(body, dict)
+            or not isinstance(body.get("code"), str) or not CODE.fullmatch(body["code"])
+        ):
+            raise EditorError(_error(body))
         return f"{self.base_url}/e/{body['code']}"
 
     async def upload(self, raw):
@@ -144,8 +174,12 @@ class EditorClient:
         status, body = await self._request(
             "POST", "/api/images", data=raw, headers={"content-type": "application/octet-stream"}
         )
-        if status != 201 or not isinstance(body, dict) or not isinstance(body.get("path"), str):
-            raise EditorError((body or {}).get("error") if isinstance(body, dict) else OFFLINE)
+        if (
+            status != 201 or not isinstance(body, dict)
+            or not isinstance(body.get("path"), str)
+            or not re.fullmatch(r"/api/images/[0-9a-f]{64}", body["path"])
+        ):
+            raise EditorError(_error(body))
         return self.base_url + body["path"]
 
     async def fetch_document(self, code):
@@ -165,21 +199,15 @@ class EditorClient:
         return design
 
     async def _download(self, url):
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        try:
-            async with (
-                aiohttp.ClientSession(timeout=timeout) as session,
-                session.get(url, allow_redirects=False) as response,
-            ):
-                if response.status != 200:
-                    raise EditorError(
-                        "A Discord image has expired. Please upload it again in the editor."
-                    )
-                return await read_all(response, MAX_IMAGE)
-        except (aiohttp.ClientError, TimeoutError):
+        status, raw = await self._request(
+            "GET", url, limit=MAX_IMAGE, parse=False,
+            offline="An image could not be loaded. Please upload it in the editor.",
+        )
+        if status != 200:
             raise EditorError(
-                "An image could not be loaded. Please upload it in the editor."
-            ) from None
+                "A Discord image has expired. Please upload it again in the editor."
+            )
+        return raw
 
     async def adopt_images(self, design):
         """Store editor and Discord images and point the blocks at attachment:// names.
@@ -190,19 +218,27 @@ class EditorClient:
             raise EditorError("The client needs a MediaStore to adopt images.")
         design = copy.deepcopy(design)
         attachments = dict(design.get("attachments", {}))
+        adopted = {}
         for block in design["blocks"]:
             for key in ("image", "gallery"):
                 value = block.get(key)
                 if not isinstance(value, str):
                     continue
-                if self.image_url.fullmatch(value):
+                if value in adopted:
+                    block[key] = adopted[value]
+                    continue
+                try:
+                    source = URL(value)
+                except (TypeError, ValueError):
+                    continue
+                if self.image_url.fullmatch(str(source)):
                     status, raw = await self._request(
-                        "GET", urlsplit(value).path, limit=MAX_IMAGE, parse=False
+                        "GET", str(source), limit=MAX_IMAGE, parse=False
                     )
                     if status != 200:
                         raise EditorError("An uploaded image has expired. Please upload it again.")
-                elif value.startswith("https://") and urlsplit(value).hostname in DISCORD_MEDIA:
-                    raw = await self._download(value)
+                elif source.scheme == "https" and source.host in DISCORD_MEDIA:
+                    raw = await self._download(str(source))
                 else:
                     continue
                 try:
@@ -212,6 +248,7 @@ class EditorClient:
                 filename = self.media.attachment_name(stored, raw)
                 attachments[filename] = stored
                 block[key] = f"attachment://{filename}"
+                adopted[value] = block[key]
         if attachments:
             design["attachments"] = attachments
         return design
@@ -220,6 +257,7 @@ class EditorClient:
         """Reverse of adopt_images: upload stored attachments so the editor can show them."""
         design = copy.deepcopy(design)
         stored = design.pop("attachments", {})
+        uploaded = {}
         for block in design.get("blocks", []):
             for key in ("image", "gallery"):
                 value = block.get(key)
@@ -227,7 +265,9 @@ class EditorClient:
                     name = stored.get(value.removeprefix("attachment://"))
                     if name is None or self.media is None:
                         raise EditorError("An image of this template is missing.")
-                    block[key] = await self.upload(self.media.read(name))
+                    if name not in uploaded:
+                        uploaded[name] = await self.upload(self.media.read(name))
+                    block[key] = uploaded[name]
         return validate_design(design)
 
     async def open_message(self, message, *, on_row_item=None, **document):

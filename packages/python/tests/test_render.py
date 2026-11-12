@@ -115,3 +115,64 @@ def test_render_message_puts_content_outside():
     items = render_message(design, guild=guild())
     assert [type(item).__name__ for item in items] == ["TextDisplay", "Container"]
     assert items[0].content == "<@&1> Example\\_Server"
+
+
+
+
+def test_all_gallery_images_survive_grouping():
+    urls = [f"https://images.example/{n}.png" for n in range(20)]
+    container = render(discord.ui.Container(), {"blocks": [{"gallery": url} for url in urls]})
+    data = [item.to_component_dict() for item in container.children]
+    assert [len(item["items"]) for item in data] == [10, 10]
+    assert [image["media"]["url"] for item in data for image in item["items"]] == urls
+
+
+def test_outside_only_and_empty_output():
+    import pytest
+
+    from discomposer import TemplateError, render_message
+
+    items = render_message({"content": "Only outside", "blocks": []})
+    assert [type(item).__name__ for item in items] == ["TextDisplay"]
+    with pytest.raises(TemplateError):
+        render_message({"blocks": [{"slot": "missing"}]})
+
+
+def test_render_applies_design_color_to_existing_container():
+    container = render(discord.ui.Container(accent_colour=123), {"color": 0, "blocks": []})
+    assert container.to_component_dict()["accent_color"] == 0
+
+
+
+
+def test_empty_variable_values_do_not_leave_empty_displays():
+    import pytest
+
+    from discomposer import TemplateError, render_message
+
+    with pytest.raises(TemplateError):
+        render_message({"content": "{mention}", "blocks": [{"text": "{nickname}"}]})
+    assert len(render_message({"content": " ", "blocks": [{"text": "Visible"}]})) == 1
+
+
+
+
+def test_one_render_scans_members_once_for_all_text_blocks():
+    class CountedMembers(list):
+        scans = 0
+
+        def __iter__(self):
+            self.scans += 1
+            return super().__iter__()
+
+    server = guild()
+    server.chunked = True
+    person = member(server)
+    server.members = CountedMembers([person])
+    container = render(
+        discord.ui.Container(),
+        {"blocks": [{"text": "{member_number}"} for _ in range(20)]},
+        member=person,
+    )
+    assert container.children[0].content == "\n".join(["1"] * 20)
+    assert server.members.scans == 1

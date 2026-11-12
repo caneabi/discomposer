@@ -13,7 +13,8 @@ A template is a JSON document that the editor stores and a bot fetches with a co
 | `context` | What the bot offers; the editor shows it for selection. |
 | `title`, `kind`, `template`, `note`, `returnHint`, `sender`, `messageType` | Shown in the editor. Bots may ignore them. |
 
-Unknown fields make the document invalid.
+Unknown top-level fields, context keys and block types make the document invalid.
+Other nested fields are normalized to the supported fields by the libraries.
 
 ## Blocks
 
@@ -62,3 +63,19 @@ Every block is an object with exactly one key.
 
 - `valid.json`: valid documents.
 - `invalid.json`: invalid documents. `REPEAT_<n>` is replaced by `n` characters in tests.
+
+
+## Protocol and compatibility
+
+See [API.md](API.md) for configurable editor URLs, HTTP storage endpoints and the
+complete handoff to a bot. Only the blocks above belong to v1. Historical `roles`
+and `ticket_menu` blocks are rejected; owning applications must convert old data
+before sending it. The editor and JS backend use the package's validator directly.
+
+
+
+String limits count UTF-16 code units in both libraries (for example, an astral
+emoji counts as two). IDs and custom emoji names use ASCII letters/digits.
+Rendering groups consecutive gallery images in batches of ten without discarding
+images. Message renderers omit an empty container and raise TemplateError when
+no visible component remains after resolving bot-provided blocks.
